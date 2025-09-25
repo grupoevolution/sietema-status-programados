@@ -28,7 +28,30 @@ let currentCycleStartDate = null;
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
-// ============ FUNÇÕES AUXILIARES ============
+// ============ FUNÇÕES AUXILIARES CORRIGIDAS ============
+
+// Helper para URLs
+function joinUrl(...parts) {
+    return parts.map(p => String(p).replace(/(^\/+|\/+$)/g, '')).join('/');
+}
+
+// Funções de horário de Brasília corrigidas
+function getBrasiliaDate() {
+    return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+}
+
+function getBrasiliaHHMM(date = null) {
+    const d = date || getBrasiliaDate();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+}
+
+function normalizeHHMM(hhmm) {
+    if (!hhmm) return hhmm;
+    const parts = String(hhmm).split(':').map(p => Number(p));
+    return `${String(parts[0] || 0).padStart(2,'0')}:${String(parts[1] || 0).padStart(2,'0')}`;
+}
 
 function getBrasiliaTime() {
     return new Date().toLocaleString('pt-BR', {
@@ -98,6 +121,17 @@ async function loadScheduleFromFile() {
         isSystemActive = parsed.isSystemActive !== undefined ? parsed.isSystemActive : true;
         currentCycleStartDate = parsed.currentCycleStartDate;
         
+        // Normalizar horários ao carregar
+        statusSchedule.forEach(day => {
+            if (day.posts) {
+                day.posts.forEach(post => {
+                    if (post.time) {
+                        post.time = normalizeHHMM(post.time);
+                    }
+                });
+            }
+        });
+        
         addLog('SCHEDULE_LOAD', `Cronograma carregado: ${statusSchedule.length} dias`);
         return true;
     } catch (error) {
@@ -129,7 +163,7 @@ setInterval(async () => {
 // ============ EVOLUTION API - CORRIGIDA ============
 
 async function sendToEvolution(instanceName, endpoint, payload) {
-    const url = EVOLUTION_BASE_URL + endpoint + '/' + instanceName;
+    const url = joinUrl(EVOLUTION_BASE_URL, endpoint, instanceName);
     try {
         const response = await axios.post(url, payload, {
             headers: {
@@ -138,42 +172,46 @@ async function sendToEvolution(instanceName, endpoint, payload) {
             },
             timeout: 15000
         });
-        return { ok: true, data: response.data };
+        addLog('EVOLUTION_RESPONSE', `Resposta ${instanceName}`, { status: response.status, data: response.data });
+        return { ok: true, data: response.data, status: response.status };
     } catch (error) {
+        const respData = error.response?.data;
+        const respStatus = error.response?.status;
+        addLog('EVOLUTION_HTTP_ERROR', `Erro axios ${respStatus || ''} ${error.message}`, {
+            response: respData,
+            code: error.code
+        });
         return { 
             ok: false, 
-            error: error.response?.data || error.message,
-            status: error.response?.status
+            error: respData || error.message,
+            status: respStatus,
+            code: error.code
         };
     }
 }
 
-// FUNÇÃO CORRIGIDA - BASEADA NA DOCUMENTAÇÃO OFICIAL
+// FUNÇÃO CORRIGIDA - PAYLOAD MULTI-FORMATO
 async function postStatus(instanceName, content) {
     const { type, text, mediaUrl } = content;
-    
-    // Formato correto baseado na documentação oficial da Evolution API
-    let payload = {
+
+    const payload = {
         type: type,
-        allContacts: true
+        allContacts: true,
+        statusJidList: [],
+        content: text || ''
     };
-    
-    if (type === 'text') {
-        payload.content = text;
-    } else if (type === 'image') {
-        payload.content = text || '';
+
+    if (mediaUrl) {
         payload.media = mediaUrl;
-    } else if (type === 'video') {
-        payload.content = text || '';
-        payload.media = mediaUrl;
-    } else if (type === 'audio') {
-        payload.media = mediaUrl;
+        payload.mediaUrl = mediaUrl;
     }
-    
+
+    addLog('POST_PAYLOAD_BUILD', `Payload montado para ${instanceName}`, { payload });
+
     return await sendToEvolution(instanceName, '/message/sendStatus', payload);
 }
 
-// ============ LÓGICA DE CRONOGRAMA ============
+// ============ LÓGICA DE CRONOGRAMA CORRIGIDA ============
 
 function getCurrentDay() {
     if (!currentCycleStartDate) {
@@ -182,7 +220,7 @@ function getCurrentDay() {
     }
     
     const startDate = new Date(currentCycleStartDate + 'T00:00:00-03:00');
-    const today = new Date();
+    const today = getBrasiliaDate();
     
     const diffTime = today.getTime() - startDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
@@ -202,26 +240,24 @@ async function checkAndPostScheduledStatus() {
     if (!isSystemActive || statusSchedule.length === 0) {
         return;
     }
-    
-    const now = new Date();
-    const currentTime = now.toTimeString().slice(0, 5);
+
+    const currentTime = getBrasiliaHHMM();
     const dayInfo = getCurrentDay();
     const currentDaySchedule = statusSchedule[dayInfo.currentDay - 1];
-    
+
     if (!currentDaySchedule || !currentDaySchedule.posts) {
         return;
     }
-    
-    // Verificar posts agendados para este horário
+
     for (const post of currentDaySchedule.posts) {
-        if (post.time === currentTime && !post.sentToday) {
+        const postTimeNormalized = normalizeHHMM(post.time);
+        if (postTimeNormalized === currentTime && !post.sentToday) {
             await sendScheduledPost(post, dayInfo.currentDay);
             post.sentToday = true;
             post.lastSent = getBrasiliaTime();
         }
     }
-    
-    // Reset diário às 00:00
+
     if (currentTime === '00:00') {
         resetDailyFlags();
     }
@@ -234,8 +270,8 @@ async function sendScheduledPost(post, dayNumber) {
     let failureCount = 0;
     const results = [];
     
-    // Enviar para todas as instâncias simultaneamente
-    const promises = INSTANCES.map(async (instanceName) => {
+    // Envio sequencial com delay para evitar throttling
+    for (const instanceName of INSTANCES) {
         try {
             const result = await postStatus(instanceName, post);
             
@@ -252,6 +288,10 @@ async function sendScheduledPost(post, dayNumber) {
                 });
                 addLog('STATUS_POST_FAILED', `Falha no envio via ${instanceName}: ${JSON.stringify(result.error)}`);
             }
+            
+            // Delay entre envios
+            await new Promise(resolve => setTimeout(resolve, 250));
+            
         } catch (error) {
             failureCount++;
             results.push({ 
@@ -261,9 +301,7 @@ async function sendScheduledPost(post, dayNumber) {
             });
             addLog('STATUS_POST_ERROR', `Erro no envio via ${instanceName}: ${error.message}`);
         }
-    });
-    
-    await Promise.all(promises);
+    }
     
     addLog('SCHEDULED_POST_COMPLETE', `Post finalizado - ${successCount} sucessos, ${failureCount} falhas`, {
         dayNumber,
@@ -303,6 +341,7 @@ app.get('/api/status', (req, res) => {
         daysInCurrentCycle: dayInfo.daysInCurrentCycle,
         totalInstances: INSTANCES.length,
         currentTime: getBrasiliaTime(),
+        currentTimeHHMM: getBrasiliaHHMM(),
         postsToday: currentDaySchedule.posts ? currentDaySchedule.posts.length : 0,
         nextPosts: getNextPosts(3)
     };
@@ -337,6 +376,17 @@ app.post('/api/schedule', (req, res) => {
                 error: 'Cronograma deve ser um array'
             });
         }
+        
+        // Normalizar horários ao salvar
+        schedule.forEach(day => {
+            if (day.posts) {
+                day.posts.forEach(post => {
+                    if (post.time) {
+                        post.time = normalizeHHMM(post.time);
+                    }
+                });
+            }
+        });
         
         statusSchedule = schedule;
         isSystemActive = isActive !== undefined ? isActive : true;
@@ -425,7 +475,7 @@ app.post('/api/test-post', async (req, res) => {
     let failureCount = 0;
     const results = [];
     
-    // Processamento sequencial para evitar rate limiting
+    // Processamento sequencial com delay
     for (const instanceName of targetInstances) {
         try {
             const result = await postStatus(instanceName, { type, text, mediaUrl });
@@ -442,7 +492,7 @@ app.post('/api/test-post', async (req, res) => {
                 });
             }
             
-            // Pequeno delay entre requisições
+            // Delay entre requisições
             await new Promise(resolve => setTimeout(resolve, 200));
             
         } catch (error) {
@@ -473,7 +523,7 @@ app.get('/api/evolution-debug', async (req, res) => {
     
     try {
         // Teste 1: Listar instâncias ativas
-        const listResponse = await axios.get(EVOLUTION_BASE_URL + '/instance/fetchInstances', {
+        const listResponse = await axios.get(joinUrl(EVOLUTION_BASE_URL, 'instance/fetchInstances'), {
             headers: {
                 'Content-Type': 'application/json',
                 'apikey': EVOLUTION_API_KEY
@@ -509,12 +559,16 @@ app.get('/api/evolution-debug', async (req, res) => {
     // Teste 2: Verificar formato correto da API
     try {
         const testPayload = {
-            statusJidList: [],
             type: 'text',
+            allContacts: true,
+            statusJidList: [],
             content: 'Teste de debug'
         };
         
-        const testResponse = await axios.post(EVOLUTION_BASE_URL + '/message/sendStatus/GABY01', testPayload, {
+        const testUrl = joinUrl(EVOLUTION_BASE_URL, 'message/sendStatus/GABY01');
+        addLog('DEBUG_TEST_URL', `Testando URL: ${testUrl}`, { payload: testPayload });
+        
+        const testResponse = await axios.post(testUrl, testPayload, {
             headers: {
                 'Content-Type': 'application/json',
                 'apikey': EVOLUTION_API_KEY
@@ -541,6 +595,7 @@ app.get('/api/evolution-debug', async (req, res) => {
         api_key_configured: EVOLUTION_API_KEY !== 'SUA_API_KEY_AQUI',
         instances_configured: INSTANCES,
         debug_timestamp: getBrasiliaTime(),
+        current_time_hhmm: getBrasiliaHHMM(),
         tests: debugResults
     });
 });
@@ -561,7 +616,7 @@ function getNextPosts(limit = 5) {
                 if (posts.length < limit) {
                     posts.push({
                         day: dayNumber,
-                        time: post.time,
+                        time: normalizeHHMM(post.time),
                         type: post.type,
                         text: post.text ? post.text.substring(0, 50) + '...' : '',
                         scheduled: true
@@ -599,6 +654,7 @@ async function initializeSystem() {
     console.log('✅ Sistema inicializado');
     console.log(`📅 Cronograma: ${statusSchedule.length} dias`);
     console.log(`🕒 Horário: ${getBrasiliaTime()}`);
+    console.log(`🕒 Horário HH:MM: ${getBrasiliaHHMM()}`);
     console.log(`📊 Status: ${isSystemActive ? 'Ativo' : 'Inativo'}`);
 }
 
@@ -607,7 +663,7 @@ setInterval(checkAndPostScheduledStatus, 60000);
 
 app.listen(PORT, async () => {
     console.log('='.repeat(70));
-    console.log('📱 SISTEMA DE STATUS PROGRAMADOS V1.0');
+    console.log('📱 SISTEMA DE STATUS PROGRAMADOS V1.0 - CORRIGIDO');
     console.log('='.repeat(70));
     console.log('Porta:', PORT);
     console.log('Evolution API:', EVOLUTION_BASE_URL);
