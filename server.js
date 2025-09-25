@@ -491,6 +491,16 @@ app.get('/api/logs', (req, res) => {
 app.post('/api/test-post', async (req, res) => {
     const { type, text, mediaUrl, instances } = req.body;
     
+    // Debug do que chegou na API
+    addLog('TEST_API_INPUT', `Dados recebidos na API test-post`, { 
+        body: req.body, 
+        type, 
+        text, 
+        mediaUrl,
+        textType: typeof text,
+        textLength: text ? text.length : 0
+    });
+    
     if (!type) {
         return res.status(400).json({
             success: false,
