@@ -547,6 +547,100 @@ async function initializeSystem() {
 
 // Verificar posts agendados a cada minuto
 setInterval(checkAndPostScheduledStatus, 60000);
+// ADICIONE ESTE ENDPOINT NO SEU server.js (antes do app.listen)
+
+// Debug da Evolution API
+app.get('/api/evolution-debug', async (req, res) => {
+    const debugResults = [];
+    
+    // Teste 1: Listar instâncias
+    try {
+        const listResponse = await axios.get(EVOLUTION_BASE_URL + '/instance/fetchInstances', {
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY
+            },
+            timeout: 10000
+        });
+        debugResults.push({
+            test: 'Listar Instâncias',
+            status: 'success',
+            data: listResponse.data
+        });
+    } catch (error) {
+        debugResults.push({
+            test: 'Listar Instâncias',
+            status: 'failed',
+            error: error.response?.data || error.message
+        });
+    }
+    
+    // Teste 2: Status de uma instância
+    try {
+        const statusResponse = await axios.get(EVOLUTION_BASE_URL + '/instance/connect/GABY01', {
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY
+            },
+            timeout: 10000
+        });
+        debugResults.push({
+            test: 'Status GABY01',
+            status: 'success',
+            data: statusResponse.data
+        });
+    } catch (error) {
+        debugResults.push({
+            test: 'Status GABY01',
+            status: 'failed',
+            error: error.response?.data || error.message
+        });
+    }
+    
+    // Teste 3: Diferentes formatos de endpoint de status
+    const testPayload = {
+        type: 'text',
+        content: 'Teste debug'
+    };
+    
+    const endpoints = [
+        '/message/sendStatus/GABY01',
+        '/sendStatus/GABY01',
+        '/status/send/GABY01',
+        '/message/status/GABY01'
+    ];
+    
+    for (const endpoint of endpoints) {
+        try {
+            const response = await axios.post(EVOLUTION_BASE_URL + endpoint, testPayload, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': EVOLUTION_API_KEY
+                },
+                timeout: 10000
+            });
+            debugResults.push({
+                test: `Endpoint ${endpoint}`,
+                status: 'success',
+                data: response.data
+            });
+        } catch (error) {
+            debugResults.push({
+                test: `Endpoint ${endpoint}`,
+                status: 'failed',
+                error: error.response?.data || error.message,
+                statusCode: error.response?.status
+            });
+        }
+    }
+    
+    res.json({
+        evolution_url: EVOLUTION_BASE_URL,
+        api_key_length: EVOLUTION_API_KEY.length,
+        instances: INSTANCES,
+        tests: debugResults
+    });
+});
 
 app.listen(PORT, async () => {
     console.log('='.repeat(70));
