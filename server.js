@@ -148,30 +148,25 @@ async function sendToEvolution(instanceName, endpoint, payload) {
     }
 }
 
-// FUNÇÃO CORRIGIDA - PROBLEMA PRINCIPAL ESTAVA AQUI
+// FUNÇÃO CORRIGIDA - BASEADA NA DOCUMENTAÇÃO OFICIAL
 async function postStatus(instanceName, content) {
     const { type, text, mediaUrl } = content;
     
-    // statusJidList precisa ter pelo menos 1 contato
-    // "status@broadcast" é o ID especial para status público
+    // Formato correto baseado na documentação oficial da Evolution API
     let payload = {
-        statusJidList: ["status@broadcast"]
+        type: type,
+        allContacts: true
     };
     
     if (type === 'text') {
-        payload.type = 'text';
         payload.content = text;
     } else if (type === 'image') {
-        payload.type = 'image';
         payload.content = text || '';
         payload.media = mediaUrl;
     } else if (type === 'video') {
-        payload.type = 'video'; 
         payload.content = text || '';
         payload.media = mediaUrl;
     } else if (type === 'audio') {
-        payload.type = 'audio';
-        payload.content = text || '';
         payload.media = mediaUrl;
     }
     
