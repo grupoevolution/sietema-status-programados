@@ -177,9 +177,22 @@ async function sendToEvolution(instanceName, endpoint, payload) {
     } catch (error) {
         const respData = error.response?.data;
         const respStatus = error.response?.status;
+        const respHeaders = error.response?.headers;
+        // log detalhado
         addLog('EVOLUTION_HTTP_ERROR', `Erro axios ${respStatus || ''} ${error.message}`, {
-            response: respData,
-            code: error.code
+            responseData: respData,
+            responseStatus: respStatus,
+            responseHeaders: respHeaders,
+            code: error.code,
+            stack: error.stack
+        });
+        // também imprima no console (útil ao chamar curl)
+        console.error('EVOLUTION_HTTP_ERROR_DETAILED', {
+            instance: instanceName,
+            status: respStatus,
+            data: respData,
+            code: error.code,
+            message: error.message
         });
         return { 
             ok: false, 
@@ -190,23 +203,28 @@ async function sendToEvolution(instanceName, endpoint, payload) {
     }
 }
 
-// FUNÇÃO CORRIGIDA - PAYLOAD MULTI-FORMATO
+// FUNÇÃO TEMPORÁRIA - PAYLOAD MÍNIMO PARA TESTE
 async function postStatus(instanceName, content) {
-    const { type, text, mediaUrl } = content;
+    const { type, text } = content;
 
-    const payload = {
-        type: type,
-        allContacts: true,
-        statusJidList: [],
-        content: text || ''
-    };
-
-    if (mediaUrl) {
-        payload.media = mediaUrl;
-        payload.mediaUrl = mediaUrl;
+    if (type !== 'text') {
+        // fallback para o comportamento anterior quando testar mídia
+        // você pode expandir depois
+        return await sendToEvolution(instanceName, '/message/sendStatus', {
+            type,
+            content: text || '',
+            allContacts: true
+        });
     }
 
-    addLog('POST_PAYLOAD_BUILD', `Payload montado para ${instanceName}`, { payload });
+    // payload mínimo para texto
+    const payload = {
+        type: 'text',
+        content: text || '',
+        allContacts: true
+    };
+
+    addLog('POST_PAYLOAD_BUILD', `Payload mínimo (text) para ${instanceName}`, { payload });
 
     return await sendToEvolution(instanceName, '/message/sendStatus', payload);
 }
