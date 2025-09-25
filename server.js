@@ -152,9 +152,10 @@ async function sendToEvolution(instanceName, endpoint, payload) {
 async function postStatus(instanceName, content) {
     const { type, text, mediaUrl } = content;
     
-    // Campo obrigatório identificado no debug
+    // statusJidList precisa ter pelo menos 1 contato
+    // "status@broadcast" é o ID especial para status público
     let payload = {
-        statusJidList: [] // Lista vazia = enviar para todos os contatos
+        statusJidList: ["status@broadcast"]
     };
     
     if (type === 'text') {
