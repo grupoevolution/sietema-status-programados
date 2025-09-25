@@ -191,6 +191,7 @@ async function sendToEvolution(instanceName, endpoint, payload) {
             instance: instanceName,
             status: respStatus,
             data: respData,
+            fullResponse: JSON.stringify(respData, null, 2), // JSON completo expandido
             code: error.code,
             message: error.message
         });
@@ -533,6 +534,87 @@ app.post('/api/test-post', async (req, res) => {
             details: results
         }
     });
+});
+
+// Teste manual direto da Evolution API
+app.post('/api/direct-test', async (req, res) => {
+    try {
+        const testPayloads = [
+            // Teste 1: Formato mínimo
+            {
+                name: 'Formato mínimo',
+                payload: {
+                    type: 'text',
+                    content: 'Teste mínimo',
+                    allContacts: true
+                }
+            },
+            // Teste 2: Com statusJidList vazio
+            {
+                name: 'Com statusJidList vazio',
+                payload: {
+                    type: 'text',
+                    content: 'Teste com statusJidList',
+                    statusJidList: []
+                }
+            },
+            // Teste 3: Sem allContacts
+            {
+                name: 'Sem allContacts',
+                payload: {
+                    type: 'text',
+                    content: 'Teste sem allContacts'
+                }
+            }
+        ];
+
+        const results = [];
+        
+        for (const test of testPayloads) {
+            try {
+                const response = await axios.post(
+                    `${EVOLUTION_BASE_URL}/message/sendStatus/GABY01`, 
+                    test.payload,
+                    {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': EVOLUTION_API_KEY
+                        },
+                        timeout: 10000
+                    }
+                );
+                
+                results.push({
+                    test: test.name,
+                    status: 'success',
+                    payload: test.payload,
+                    response: response.data
+                });
+                
+            } catch (error) {
+                results.push({
+                    test: test.name,
+                    status: 'failed',
+                    payload: test.payload,
+                    error: error.response?.data,
+                    statusCode: error.response?.status,
+                    errorMessage: error.message
+                });
+            }
+        }
+        
+        res.json({
+            success: true,
+            results,
+            evolution_url: EVOLUTION_BASE_URL
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 // Debug Evolution - MELHORADO
