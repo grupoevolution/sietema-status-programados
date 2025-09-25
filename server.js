@@ -204,27 +204,40 @@ async function sendToEvolution(instanceName, endpoint, payload) {
     }
 }
 
-// FUNÇÃO CORRIGIDA - CAMPO CONTENT COM MAIÚSCULA
+// FUNÇÃO CORRIGIDA - COM DEBUG DO TEXTO RECEBIDO
 async function postStatus(instanceName, content) {
-    const { type, text } = content;
+    const { type, text, mediaUrl } = content;
+    
+    // Debug: verificar o que está sendo recebido
+    addLog('POST_DEBUG_INPUT', `Input recebido para ${instanceName}`, { 
+        type, 
+        text, 
+        mediaUrl,
+        textLength: text ? text.length : 0,
+        textValue: `"${text}"` 
+    });
 
     if (type !== 'text') {
-        // fallback para o comportamento anterior quando testar mídia
         return await sendToEvolution(instanceName, '/message/sendStatus', {
             type,
-            Content: text || '',  // MAIÚSCULA
+            Content: text || 'Teste padrão',
             allContacts: true
         });
     }
 
-    // payload mínimo para texto - CAMPO CORRETO
+    // Garantir que sempre tem texto
+    const finalText = text || 'Texto de teste padrão';
+
     const payload = {
         type: 'text',
-        Content: text || '',  // MAIÚSCULA AQUI!
+        Content: finalText,
         allContacts: true
     };
 
-    addLog('POST_PAYLOAD_BUILD', `Payload corrigido (Content maiúscula) para ${instanceName}`, { payload });
+    addLog('POST_PAYLOAD_BUILD', `Payload final para ${instanceName}`, { 
+        payload,
+        contentLength: finalText.length 
+    });
 
     return await sendToEvolution(instanceName, '/message/sendStatus', payload);
 }
