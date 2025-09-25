@@ -8,24 +8,24 @@ const app = express();
 // ============ CONFIGURAÇÕES ============
 const EVOLUTION_BASE_URL = process.env.EVOLUTION_BASE_URL || 'https://evo.flowzap.fun';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || 'SUA_API_KEY_AQUI';
-const PORT = process.env.PORT || 3001; // Porta diferente do sistema principal
+const PORT = process.env.PORT || 3001;
 const SCHEDULE_FILE = path.join(__dirname, 'data', 'status-schedule.json');
 const LOGS_FILE = path.join(__dirname, 'data', 'status-logs.json');
 
-// Instâncias Evolution (mesmo array do sistema principal)
+// Instâncias Evolution
 const INSTANCES = ['GABY01', 'GABY02', 'GABY03', 'GABY04', 'GABY05', 'GABY06', 'GABY07', 'GABY08', 'GABY09'];
 
 // ============ TIMEZONE BRASÍLIA ============
 process.env.TZ = 'America/Sao_Paulo';
 
 // ============ ARMAZENAMENTO EM MEMÓRIA ============
-let statusSchedule = []; // Array com cronograma de 10 dias
+let statusSchedule = [];
 let logs = [];
 let isSystemActive = true;
 let currentCycleStartDate = null;
 
 // ============ MIDDLEWARES ============
-app.use(express.json({ limit: '10mb' })); // Aumentar limite para uploads
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 // ============ FUNÇÕES AUXILIARES ============
@@ -110,7 +110,7 @@ async function saveLogsToFile() {
     try {
         await ensureDataDir();
         const logsData = {
-            logs: logs.slice(0, 100), // Salvar apenas os 100 logs mais recentes
+            logs: logs.slice(0, 100),
             lastUpdate: getBrasiliaTime()
         };
         
@@ -126,7 +126,7 @@ setInterval(async () => {
     await saveLogsToFile();
 }, 30000);
 
-// ============ EVOLUTION API ============
+// ============ EVOLUTION API - CORRIGIDA ============
 
 async function sendToEvolution(instanceName, endpoint, payload) {
     const url = EVOLUTION_BASE_URL + endpoint + '/' + instanceName;
@@ -148,33 +148,30 @@ async function sendToEvolution(instanceName, endpoint, payload) {
     }
 }
 
+// FUNÇÃO CORRIGIDA - PROBLEMA PRINCIPAL ESTAVA AQUI
 async function postStatus(instanceName, content) {
     const { type, text, mediaUrl } = content;
     
-    let payload = {};
+    // Campo obrigatório identificado no debug
+    let payload = {
+        statusJidList: [] // Lista vazia = enviar para todos os contatos
+    };
     
     if (type === 'text') {
-        payload = {
-            type: 'text',
-            content: text
-        };
+        payload.type = 'text';
+        payload.content = text;
     } else if (type === 'image') {
-        payload = {
-            type: 'image',
-            content: text || '',
-            media: mediaUrl
-        };
+        payload.type = 'image';
+        payload.content = text || '';
+        payload.media = mediaUrl;
     } else if (type === 'video') {
-        payload = {
-            type: 'video', 
-            content: text || '',
-            media: mediaUrl
-        };
+        payload.type = 'video'; 
+        payload.content = text || '';
+        payload.media = mediaUrl;
     } else if (type === 'audio') {
-        payload = {
-            type: 'audio',
-            media: mediaUrl
-        };
+        payload.type = 'audio';
+        payload.content = text || '';
+        payload.media = mediaUrl;
     }
     
     return await sendToEvolution(instanceName, '/message/sendStatus', payload);
@@ -188,13 +185,12 @@ function getCurrentDay() {
         saveScheduleToFile();
     }
     
-    const startDate = new Date(currentCycleStartDate + 'T00:00:00-03:00'); // Brasília timezone
+    const startDate = new Date(currentCycleStartDate + 'T00:00:00-03:00');
     const today = new Date();
     
     const diffTime = today.getTime() - startDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     
-    // Ciclo de dias (se tem 10 dias programados, volta ao dia 1 após dia 10)
     const totalDays = statusSchedule.length || 10;
     const currentDay = (diffDays % totalDays) + 1;
     
@@ -212,7 +208,7 @@ async function checkAndPostScheduledStatus() {
     }
     
     const now = new Date();
-    const currentTime = now.toTimeString().slice(0, 5); // HH:mm format
+    const currentTime = now.toTimeString().slice(0, 5);
     const dayInfo = getCurrentDay();
     const currentDaySchedule = statusSchedule[dayInfo.currentDay - 1];
     
@@ -433,6 +429,7 @@ app.post('/api/test-post', async (req, res) => {
     let failureCount = 0;
     const results = [];
     
+    // Processamento sequencial para evitar rate limiting
     for (const instanceName of targetInstances) {
         try {
             const result = await postStatus(instanceName, { type, text, mediaUrl });
@@ -448,6 +445,10 @@ app.post('/api/test-post', async (req, res) => {
                     error: result.error 
                 });
             }
+            
+            // Pequeno delay entre requisições
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
         } catch (error) {
             failureCount++;
             results.push({ 
@@ -470,20 +471,82 @@ app.post('/api/test-post', async (req, res) => {
     });
 });
 
-// Debug Evolution
-app.get('/api/debug', async (req, res) => {
-    const debugInfo = {
-        evolution_base_url: EVOLUTION_BASE_URL,
-        evolution_api_key_configured: EVOLUTION_API_KEY !== 'SUA_API_KEY_AQUI',
-        instances: INSTANCES,
-        system_active: isSystemActive,
-        schedule_days: statusSchedule.length,
-        current_time_brasilia: getBrasiliaTime(),
-        current_day_info: getCurrentDay(),
-        next_posts: getNextPosts(5)
-    };
+// Debug Evolution - MELHORADO
+app.get('/api/evolution-debug', async (req, res) => {
+    const debugResults = [];
     
-    res.json(debugInfo);
+    try {
+        // Teste 1: Listar instâncias ativas
+        const listResponse = await axios.get(EVOLUTION_BASE_URL + '/instance/fetchInstances', {
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY
+            },
+            timeout: 10000
+        });
+        
+        const activeInstances = listResponse.data.filter(instance => 
+            INSTANCES.includes(instance.name) && instance.connectionStatus === 'open'
+        );
+        
+        debugResults.push({
+            test: 'Instâncias Evolution',
+            status: 'success',
+            data: {
+                totalFound: listResponse.data.length,
+                gabysFound: activeInstances.length,
+                activeGabys: activeInstances.map(i => i.name),
+                connectionStatus: activeInstances.map(i => ({
+                    name: i.name,
+                    status: i.connectionStatus
+                }))
+            }
+        });
+    } catch (error) {
+        debugResults.push({
+            test: 'Instâncias Evolution',
+            status: 'failed',
+            error: error.response?.data || error.message
+        });
+    }
+
+    // Teste 2: Verificar formato correto da API
+    try {
+        const testPayload = {
+            statusJidList: [],
+            type: 'text',
+            content: 'Teste de debug'
+        };
+        
+        const testResponse = await axios.post(EVOLUTION_BASE_URL + '/message/sendStatus/GABY01', testPayload, {
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY
+            },
+            timeout: 10000
+        });
+        
+        debugResults.push({
+            test: 'Formato API correto',
+            status: 'success',
+            data: testResponse.data
+        });
+    } catch (error) {
+        debugResults.push({
+            test: 'Formato API correto',
+            status: 'failed',
+            error: error.response?.data || error.message,
+            statusCode: error.response?.status
+        });
+    }
+    
+    res.json({
+        evolution_url: EVOLUTION_BASE_URL,
+        api_key_configured: EVOLUTION_API_KEY !== 'SUA_API_KEY_AQUI',
+        instances_configured: INSTANCES,
+        debug_timestamp: getBrasiliaTime(),
+        tests: debugResults
+    });
 });
 
 // ============ FUNÇÕES AUXILIARES PARA API ============
@@ -492,7 +555,6 @@ function getNextPosts(limit = 5) {
     const posts = [];
     const dayInfo = getCurrentDay();
     
-    // Buscar próximos posts nos próximos dias
     for (let i = 0; i < statusSchedule.length && posts.length < limit; i++) {
         const dayIndex = (dayInfo.currentDay - 1 + i) % statusSchedule.length;
         const day = statusSchedule[dayIndex];
@@ -529,7 +591,6 @@ async function initializeSystem() {
     await ensureDataDir();
     await loadScheduleFromFile();
     
-    // Inicializar cronograma padrão se não existir
     if (statusSchedule.length === 0) {
         statusSchedule = Array.from({ length: 10 }, (_, i) => ({
             day: i + 1,
@@ -547,100 +608,6 @@ async function initializeSystem() {
 
 // Verificar posts agendados a cada minuto
 setInterval(checkAndPostScheduledStatus, 60000);
-// ADICIONE ESTE ENDPOINT NO SEU server.js (antes do app.listen)
-
-// Debug da Evolution API
-app.get('/api/evolution-debug', async (req, res) => {
-    const debugResults = [];
-    
-    // Teste 1: Listar instâncias
-    try {
-        const listResponse = await axios.get(EVOLUTION_BASE_URL + '/instance/fetchInstances', {
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': EVOLUTION_API_KEY
-            },
-            timeout: 10000
-        });
-        debugResults.push({
-            test: 'Listar Instâncias',
-            status: 'success',
-            data: listResponse.data
-        });
-    } catch (error) {
-        debugResults.push({
-            test: 'Listar Instâncias',
-            status: 'failed',
-            error: error.response?.data || error.message
-        });
-    }
-    
-    // Teste 2: Status de uma instância
-    try {
-        const statusResponse = await axios.get(EVOLUTION_BASE_URL + '/instance/connect/GABY01', {
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': EVOLUTION_API_KEY
-            },
-            timeout: 10000
-        });
-        debugResults.push({
-            test: 'Status GABY01',
-            status: 'success',
-            data: statusResponse.data
-        });
-    } catch (error) {
-        debugResults.push({
-            test: 'Status GABY01',
-            status: 'failed',
-            error: error.response?.data || error.message
-        });
-    }
-    
-    // Teste 3: Diferentes formatos de endpoint de status
-    const testPayload = {
-        type: 'text',
-        content: 'Teste debug'
-    };
-    
-    const endpoints = [
-        '/message/sendStatus/GABY01',
-        '/sendStatus/GABY01',
-        '/status/send/GABY01',
-        '/message/status/GABY01'
-    ];
-    
-    for (const endpoint of endpoints) {
-        try {
-            const response = await axios.post(EVOLUTION_BASE_URL + endpoint, testPayload, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': EVOLUTION_API_KEY
-                },
-                timeout: 10000
-            });
-            debugResults.push({
-                test: `Endpoint ${endpoint}`,
-                status: 'success',
-                data: response.data
-            });
-        } catch (error) {
-            debugResults.push({
-                test: `Endpoint ${endpoint}`,
-                status: 'failed',
-                error: error.response?.data || error.message,
-                statusCode: error.response?.status
-            });
-        }
-    }
-    
-    res.json({
-        evolution_url: EVOLUTION_BASE_URL,
-        api_key_length: EVOLUTION_API_KEY.length,
-        instances: INSTANCES,
-        tests: debugResults
-    });
-});
 
 app.listen(PORT, async () => {
     console.log('='.repeat(70));
