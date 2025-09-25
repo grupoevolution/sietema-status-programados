@@ -204,28 +204,27 @@ async function sendToEvolution(instanceName, endpoint, payload) {
     }
 }
 
-// FUNÇÃO TEMPORÁRIA - PAYLOAD MÍNIMO PARA TESTE
+// FUNÇÃO CORRIGIDA - CAMPO CONTENT COM MAIÚSCULA
 async function postStatus(instanceName, content) {
     const { type, text } = content;
 
     if (type !== 'text') {
         // fallback para o comportamento anterior quando testar mídia
-        // você pode expandir depois
         return await sendToEvolution(instanceName, '/message/sendStatus', {
             type,
-            content: text || '',
+            Content: text || '',  // MAIÚSCULA
             allContacts: true
         });
     }
 
-    // payload mínimo para texto
+    // payload mínimo para texto - CAMPO CORRETO
     const payload = {
         type: 'text',
-        content: text || '',
+        Content: text || '',  // MAIÚSCULA AQUI!
         allContacts: true
     };
 
-    addLog('POST_PAYLOAD_BUILD', `Payload mínimo (text) para ${instanceName}`, { payload });
+    addLog('POST_PAYLOAD_BUILD', `Payload corrigido (Content maiúscula) para ${instanceName}`, { payload });
 
     return await sendToEvolution(instanceName, '/message/sendStatus', payload);
 }
@@ -540,30 +539,31 @@ app.post('/api/test-post', async (req, res) => {
 app.post('/api/direct-test', async (req, res) => {
     try {
         const testPayloads = [
-            // Teste 1: Formato mínimo
+            // Teste 1: Formato mínimo com Content maiúscula
             {
-                name: 'Formato mínimo',
+                name: 'Content maiúscula',
                 payload: {
                     type: 'text',
-                    content: 'Teste mínimo',
+                    Content: 'Teste Content maiúscula',
                     allContacts: true
                 }
             },
-            // Teste 2: Com statusJidList vazio
+            // Teste 2: content minúscula (para comparar)
             {
-                name: 'Com statusJidList vazio',
+                name: 'content minúscula',
                 payload: {
                     type: 'text',
-                    content: 'Teste com statusJidList',
-                    statusJidList: []
+                    content: 'Teste content minúscula',
+                    allContacts: true
                 }
             },
-            // Teste 3: Sem allContacts
+            // Teste 3: Com statusJidList
             {
-                name: 'Sem allContacts',
+                name: 'Com statusJidList',
                 payload: {
                     type: 'text',
-                    content: 'Teste sem allContacts'
+                    Content: 'Teste com statusJidList',
+                    statusJidList: []
                 }
             }
         ];
